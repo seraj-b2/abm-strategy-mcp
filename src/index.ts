@@ -193,12 +193,19 @@ async function main() {
         if (req.method === "POST") {
           try {
             parsedBody = await readJsonBody(req);
-          } catch {
+          } catch (err) {
+            console.error(`[DEBUG] JSON parse failed: ${(err as Error).message}`);
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Invalid JSON body" }));
             return;
           }
         }
+
+        console.error(
+          `[DEBUG] method=${req.method} rawPath=${rawPath} pathname=${pathname} existingSessionId=${existingSessionId} isInit=${isInitializeRequest(
+            parsedBody
+          )} bodyPreview=${JSON.stringify(parsedBody).slice(0, 200)}`
+        );
 
         if (existingSessionId || req.method !== "POST" || !isInitializeRequest(parsedBody)) {
           res.writeHead(400, { "Content-Type": "application/json" });
