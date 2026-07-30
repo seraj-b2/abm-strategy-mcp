@@ -26,6 +26,40 @@ e.g. right after the `# 1. Backend Express API` block.
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # Workaround for a known Claude Desktop/Claude Code bug: instead of using
+    # the authorization_endpoint/token_endpoint/registration_endpoint URLs
+    # from the discovery metadata as-is, Claude sometimes rebuilds them at
+    # the bare origin (e.g. https://mcp.seraj.live/authorize instead of
+    # https://mcp.seraj.live/api/oauth/authorize). These three blocks make
+    # the bare-root paths work too, proxying to the same backend routes as
+    # /api/oauth/*. See https://github.com/anthropics/claude-code/issues/14350
+    location = /authorize {
+        proxy_pass http://127.0.0.1:3001/oauth/authorize;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /token {
+        proxy_pass http://127.0.0.1:3001/oauth/token;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /register {
+        proxy_pass http://127.0.0.1:3001/oauth/register;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 ```
 
 After editing, test and reload:
