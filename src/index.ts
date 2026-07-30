@@ -190,6 +190,22 @@ async function main() {
       const rawPath = urlParts.pathname;
       const pathname = rawPath.replace(/^\/mcp/, "") || "/";
 
+      if (rawPath === "/.well-known/oauth-protected-resource") {
+        if (!process.env.OAUTH_AUTHORIZATION_SERVER_URL) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "OAUTH_AUTHORIZATION_SERVER_URL is not configured" }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            resource: `https://${host}/mcp`,
+            authorization_servers: [process.env.OAUTH_AUTHORIZATION_SERVER_URL],
+          })
+        );
+        return;
+      }
+
       if (pathname === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", service: "abm-strategy-mcp-server" }));
