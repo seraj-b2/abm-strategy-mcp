@@ -65,43 +65,51 @@ export function getConfig(): ServerConfig {
 
 export async function verifyToken(
   token: string,
-  backendUrl: string = process.env.BACKEND_URL || "http://localhost:5000"
+  backendUrl: string = process.env.BACKEND_URL || "http://localhost:3001"
 ): Promise<VerifyTokenResponse> {
   const baseUrl = backendUrl.replace(/\/$/, "");
-  const url = `${baseUrl}/mcp/verify-token`;
+  const candidateUrls = Array.from(new Set([
+    `${baseUrl}/mcp/verify-token`,
+    `${baseUrl}/api/mcp/verify-token`,
+    "http://127.0.0.1:3001/mcp/verify-token",
+    "http://127.0.0.1:3001/api/mcp/verify-token",
+    "http://127.0.0.1:5000/mcp/verify-token",
+    "http://127.0.0.1:5000/api/mcp/verify-token"
+  ]));
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
+  let lastError = "";
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token })
+      });
 
-    if (!res.ok) {
-      const text = await res.text();
-      let parsedError: string | undefined;
-      try {
-        const json = JSON.parse(text);
-        parsedError = json.message || json.error;
-      } catch {
-        // ignore json parse error
+      if (res.ok) {
+        const data = (await res.json()) as VerifyTokenResponse;
+        if (data.valid) return data;
+      } else {
+        const text = await res.text();
+        try {
+          const json = JSON.parse(text);
+          lastError = json.message || json.error || text;
+        } catch {
+          lastError = `HTTP ${res.status}: ${text}`;
+        }
       }
-      return {
-        valid: false,
-        error: parsedError || `HTTP ${res.status}: ${res.statusText || text}`,
-      };
+    } catch (err: any) {
+      lastError = err.message || String(err);
     }
-
-    const data = (await res.json()) as VerifyTokenResponse;
-    return data;
-  } catch (err: any) {
-    return {
-      valid: false,
-      error: `Failed to connect to authentication backend at ${url}: ${err.message || String(err)}`,
-    };
   }
+
+  return {
+    valid: false,
+    error: `Failed token verification across backend endpoints: ${lastError}`,
+  };
 }
 
 export async function checkAuth(config: ServerConfig): Promise<AuthState> {
