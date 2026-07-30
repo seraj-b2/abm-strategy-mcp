@@ -189,8 +189,7 @@ async function main() {
           };
         }
 
-        const messagesEndpoint = rawPath.startsWith("/mcp") ? "/mcp/messages" : "/messages";
-        const transport = new SSEServerTransport(messagesEndpoint, res);
+        const transport = new SSEServerTransport("/mcp/messages", res);
         const sessionServer = createMcpServer(sessionAuth);
 
         sseTransports.set(transport.sessionId, transport);
