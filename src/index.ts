@@ -153,8 +153,10 @@ async function main() {
 
       const host = req.headers.host || `localhost:${config.port}`;
       const urlParts = new URL(req.url || "/", `http://${host}`);
+      const rawPath = urlParts.pathname;
+      const pathname = rawPath.replace(/^\/mcp/, "") || "/";
 
-      if (urlParts.pathname === "/sse" && req.method === "GET") {
+      if ((pathname === "/sse" || pathname === "/") && req.method === "GET") {
         const authHeader = req.headers.authorization;
         const queryToken = urlParts.searchParams.get("token");
         const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
@@ -174,16 +176,17 @@ async function main() {
           }
         }
 
-        sseTransport = new SSEServerTransport("/messages", res);
+        const messagesEndpoint = rawPath.startsWith("/mcp") ? "/mcp/messages" : "/messages";
+        sseTransport = new SSEServerTransport(messagesEndpoint, res);
         await server.connect(sseTransport);
-      } else if (urlParts.pathname === "/messages" && req.method === "POST") {
+      } else if (pathname === "/messages" && req.method === "POST") {
         if (!sseTransport) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "SSE session not established. Connect to /sse first." }));
           return;
         }
         await sseTransport.handlePostMessage(req, res);
-      } else if (urlParts.pathname === "/health") {
+      } else if (pathname === "/health" || rawPath === "/mcp/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", service: "abm-strategy-mcp-server" }));
       } else {
