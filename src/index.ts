@@ -218,10 +218,44 @@ async function main() {
         return;
       }
 
+      function sendUnauthorized(message: string) {
+        const resourceMetadataUrl = `https://${host}/.well-known/oauth-protected-resource`;
+        res.writeHead(401, {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer resource_metadata="${resourceMetadataUrl}"`,
+        });
+        res.end(JSON.stringify({ error: `Unauthorized: ${message}` }));
+      }
+
       const existingSessionId = req.headers["mcp-session-id"] as string | undefined;
       let transport = existingSessionId ? httpTransports.get(existingSessionId) : undefined;
 
       if (!transport) {
+        const authHeader = req.headers.authorization;
+        const queryToken = urlParts.searchParams.get("token");
+        const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
+
+        let sessionAuth: AuthState = { authenticated: true };
+
+        if (!config.skipAuth) {
+          if (!token) {
+            sendUnauthorized("Missing authentication token");
+            return;
+          }
+
+          const authRes = await verifyToken(token, config.backendUrl);
+          if (!authRes.valid) {
+            sendUnauthorized(authRes.error || "Invalid token");
+            return;
+          }
+
+          sessionAuth = {
+            authenticated: true,
+            user: authRes.user,
+            tokenInfo: authRes.tokenInfo,
+          };
+        }
+
         let parsedBody: unknown;
         if (req.method === "POST") {
           try {
@@ -241,33 +275,6 @@ async function main() {
             })
           );
           return;
-        }
-
-        const authHeader = req.headers.authorization;
-        const queryToken = urlParts.searchParams.get("token");
-        const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
-
-        let sessionAuth: AuthState = { authenticated: true };
-
-        if (!config.skipAuth) {
-          if (!token) {
-            res.writeHead(401, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Unauthorized: Missing authentication token" }));
-            return;
-          }
-
-          const authRes = await verifyToken(token, config.backendUrl);
-          if (!authRes.valid) {
-            res.writeHead(401, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: `Unauthorized: ${authRes.error || "Invalid token"}` }));
-            return;
-          }
-
-          sessionAuth = {
-            authenticated: true,
-            user: authRes.user,
-            tokenInfo: authRes.tokenInfo,
-          };
         }
 
         transport = new StreamableHTTPServerTransport({
