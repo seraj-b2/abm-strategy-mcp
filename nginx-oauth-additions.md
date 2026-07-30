@@ -59,7 +59,11 @@ processes:
 **abm-strategy-backend/.env** — add:
 ```
 PUBLIC_BASE_URL=https://mcp.seraj.live/api
+PUBLIC_ORIGIN=https://mcp.seraj.live
 ```
+(`PUBLIC_ORIGIN` has no `/api` suffix — it's the RFC 8414 `issuer` value,
+which must be the bare origin since the metadata document is served at
+`/.well-known/oauth-authorization-server` with no path suffix.)
 
 **abm-strategy-mcp-server/.env** — add:
 ```
