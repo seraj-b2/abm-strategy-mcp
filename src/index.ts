@@ -1,7 +1,9 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer } from "node:http";
 import {
   CallToolRequestSchema,
@@ -143,12 +145,22 @@ async function main() {
     await stdioServer.connect(transport);
     console.error("[MCP Server] Connected via Stdio transport.");
   } else {
-    const sseTransports = new Map<string, SSEServerTransport>();
+    const httpTransports = new Map<string, StreamableHTTPServerTransport>();
+
+    async function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown> {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk as Buffer);
+      }
+      const raw = Buffer.concat(chunks).toString("utf8");
+      return raw ? JSON.parse(raw) : undefined;
+    }
 
     const httpServer = createServer(async (req, res) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id");
+      res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 
       if (req.method === "OPTIONS") {
         res.writeHead(204);
@@ -161,7 +173,43 @@ async function main() {
       const rawPath = urlParts.pathname;
       const pathname = rawPath.replace(/^\/mcp/, "") || "/";
 
-      if ((pathname === "/sse" || pathname === "/") && req.method === "GET") {
+      if (pathname === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", service: "abm-strategy-mcp-server" }));
+        return;
+      }
+
+      if (pathname !== "/") {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not Found" }));
+        return;
+      }
+
+      const existingSessionId = req.headers["mcp-session-id"] as string | undefined;
+      let transport = existingSessionId ? httpTransports.get(existingSessionId) : undefined;
+
+      if (!transport) {
+        let parsedBody: unknown;
+        if (req.method === "POST") {
+          try {
+            parsedBody = await readJsonBody(req);
+          } catch {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Invalid JSON body" }));
+            return;
+          }
+        }
+
+        if (existingSessionId || req.method !== "POST" || !isInitializeRequest(parsedBody)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "Bad Request: No valid session found. Send an 'initialize' request first.",
+            })
+          );
+          return;
+        }
+
         const authHeader = req.headers.authorization;
         const queryToken = urlParts.searchParams.get("token");
         const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
@@ -189,40 +237,31 @@ async function main() {
           };
         }
 
-        const transport = new SSEServerTransport("/mcp/messages", res);
-        const sessionServer = createMcpServer(sessionAuth);
-
-        sseTransports.set(transport.sessionId, transport);
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (sessionId) => {
+            httpTransports.set(sessionId, transport!);
+          },
+        });
 
         transport.onclose = () => {
-          sseTransports.delete(transport.sessionId);
+          if (transport!.sessionId) {
+            httpTransports.delete(transport!.sessionId);
+          }
         };
 
+        const sessionServer = createMcpServer(sessionAuth);
         await sessionServer.connect(transport);
-      } else if (pathname === "/messages" && req.method === "POST") {
-        const sessionId = urlParts.searchParams.get("sessionId");
-        const transport = sessionId
-          ? sseTransports.get(sessionId)
-          : Array.from(sseTransports.values())[0];
-
-        if (!transport) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "SSE session not found. Connect to /sse first." }));
-          return;
-        }
-        await transport.handlePostMessage(req, res);
-      } else if (pathname === "/health" || rawPath === "/mcp/health") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok", service: "abm-strategy-mcp-server" }));
-      } else {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Not Found" }));
+        await transport.handleRequest(req, res, parsedBody);
+        return;
       }
+
+      await transport.handleRequest(req, res);
     });
 
     httpServer.listen(config.port, () => {
-      console.error(`[MCP Server] Running over HTTP/SSE on port ${config.port}`);
-      console.error(`[MCP Server] SSE Endpoint: http://localhost:${config.port}/sse`);
+      console.error(`[MCP Server] Running over Streamable HTTP on port ${config.port}`);
+      console.error(`[MCP Server] MCP Endpoint: http://localhost:${config.port}/mcp`);
     });
   }
 }
