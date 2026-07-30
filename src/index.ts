@@ -49,66 +49,70 @@ across a session gap. Always re-fetch via get_project_status or
 get_stage_context and trust what they report over your own memory.
 `.trim();
 
-const server = new Server(
-  {
-    name: "abm-strategy-mcp-server",
-    version: "0.1.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {},
+function createMcpServer(authState: AuthState) {
+  const server = new Server(
+    {
+      name: "abm-strategy-mcp-server",
+      version: "0.1.0",
     },
-    instructions: SERVER_INSTRUCTIONS,
-  }
-);
+    {
+      capabilities: {
+        tools: {},
+        resources: {},
+      },
+      instructions: SERVER_INSTRUCTIONS,
+    }
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: TOOLS,
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (!authState.authenticated) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text" as const,
+            text: `[MCP Authentication Error] ${
+              authState.error || "Valid token required"
+            }. Please generate a valid MCP token from your backend and update your MCP server configuration.`,
+          },
+        ],
+      };
+    }
+    return callTool(request.params.name, request.params.arguments ?? {});
+  });
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: RESOURCES,
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (!authState.authenticated) {
+      return {
+        isError: true,
+        contents: [
+          {
+            uri: request.params.uri,
+            text: `[MCP Authentication Error] ${
+              authState.error || "Valid token required"
+            }. Please generate a valid MCP token from your backend and update your MCP server configuration.`,
+          },
+        ],
+      };
+    }
+    return readResource(request.params.uri);
+  });
+
+  return server;
+}
 
 let currentAuthState: AuthState = {
   authenticated: false,
   error: "Authentication not performed yet",
 };
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOLS,
-}));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (!currentAuthState.authenticated) {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text" as const,
-          text: `[MCP Authentication Error] ${
-            currentAuthState.error || "Valid token required"
-          }. Please generate a valid MCP token from your backend and update your MCP server configuration.`,
-        },
-      ],
-    };
-  }
-  return callTool(request.params.name, request.params.arguments ?? {});
-});
-
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-  resources: RESOURCES,
-}));
-
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  if (!currentAuthState.authenticated) {
-    return {
-      isError: true,
-      contents: [
-        {
-          uri: request.params.uri,
-          text: `[MCP Authentication Error] ${
-            currentAuthState.error || "Valid token required"
-          }. Please generate a valid MCP token from your backend and update your MCP server configuration.`,
-        },
-      ],
-    };
-  }
-  return readResource(request.params.uri);
-});
 
 async function main() {
   const config = getConfig();
@@ -134,11 +138,12 @@ async function main() {
   }
 
   if (config.transport === "stdio") {
+    const stdioServer = createMcpServer(currentAuthState);
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await stdioServer.connect(transport);
     console.error("[MCP Server] Connected via Stdio transport.");
   } else {
-    let sseTransport: SSEServerTransport | null = null;
+    const sseTransports = new Map<string, SSEServerTransport>();
 
     const httpServer = createServer(async (req, res) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
@@ -161,6 +166,8 @@ async function main() {
         const queryToken = urlParts.searchParams.get("token");
         const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
 
+        let sessionAuth: AuthState = { authenticated: true };
+
         if (!config.skipAuth) {
           if (!token) {
             res.writeHead(401, { "Content-Type": "application/json" });
@@ -174,18 +181,37 @@ async function main() {
             res.end(JSON.stringify({ error: `Unauthorized: ${authRes.error || "Invalid token"}` }));
             return;
           }
+
+          sessionAuth = {
+            authenticated: true,
+            user: authRes.user,
+            tokenInfo: authRes.tokenInfo,
+          };
         }
 
         const messagesEndpoint = rawPath.startsWith("/mcp") ? "/mcp/messages" : "/messages";
-        sseTransport = new SSEServerTransport(messagesEndpoint, res);
-        await server.connect(sseTransport);
+        const transport = new SSEServerTransport(messagesEndpoint, res);
+        const sessionServer = createMcpServer(sessionAuth);
+
+        sseTransports.set(transport.sessionId, transport);
+
+        transport.onclose = () => {
+          sseTransports.delete(transport.sessionId);
+        };
+
+        await sessionServer.connect(transport);
       } else if (pathname === "/messages" && req.method === "POST") {
-        if (!sseTransport) {
+        const sessionId = urlParts.searchParams.get("sessionId");
+        const transport = sessionId
+          ? sseTransports.get(sessionId)
+          : Array.from(sseTransports.values())[0];
+
+        if (!transport) {
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "SSE session not established. Connect to /sse first." }));
+          res.end(JSON.stringify({ error: "SSE session not found. Connect to /sse first." }));
           return;
         }
-        await sseTransport.handlePostMessage(req, res);
+        await transport.handlePostMessage(req, res);
       } else if (pathname === "/health" || rawPath === "/mcp/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", service: "abm-strategy-mcp-server" }));
