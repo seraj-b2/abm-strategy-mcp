@@ -1,0 +1,20 @@
+{
+  "name": "abm-strategy-mcp-server",
+  "version": "0.1.0",
+  "description": "Local MCP server porting the abm-strategy-presentation-v5 Claude Code plugin's stage-gate bookkeeping to Claude Desktop.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.js",
+    "start": "node dist/index.js",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4"
+  }
+}

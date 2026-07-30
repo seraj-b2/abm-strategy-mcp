@@ -1,0 +1,133 @@
+export const STAGE_ORDER = [
+  "01-project-setup",
+  "02-main-inputs",
+  "03-market-analysis",
+  "04-category-maturity-analysis",
+  "05-competitor-analysis",
+  "06-brand-strength-analysis",
+  "07-right-to-win-analysis",
+  "08-icp-segments",
+  "09-personas",
+  "10-playbook-selection",
+  "11-previous-campaign-analysis",
+  "12-campaign-theme",
+  "13-content-plan",
+  "14-linkedinads-campaign-design",
+  "15-email-campaign-design",
+  "16-googleads-campaign-design",
+  "17-aeo-geo-recommendations",
+  "18-linkedin-organic",
+  "19-sdr-play-design",
+  "20-abm-strategy-document",
+  "21-abm-strategy-presentation",
+] as const;
+
+export type Stage = (typeof STAGE_ORDER)[number];
+
+export type GateStatus = "pending" | "partial" | "completed";
+
+// Stages each stage depends on for get_stage_context's upstream-outputs lookup.
+// Only stages implemented in the MVP (01-03) have real dependents wired up;
+// later stages are listed for completeness and can be extended as they're ported.
+export const STAGE_DEPENDENCIES: Record<Stage, Stage[]> = {
+  "01-project-setup": [],
+  "02-main-inputs": ["01-project-setup"],
+  "03-market-analysis": ["01-project-setup", "02-main-inputs"],
+  "04-category-maturity-analysis": ["02-main-inputs", "03-market-analysis"],
+  "05-competitor-analysis": ["02-main-inputs", "03-market-analysis"],
+  "06-brand-strength-analysis": ["02-main-inputs", "05-competitor-analysis"],
+  "07-right-to-win-analysis": [
+    "04-category-maturity-analysis",
+    "05-competitor-analysis",
+    "06-brand-strength-analysis",
+  ],
+  "08-icp-segments": ["02-main-inputs", "03-market-analysis"],
+  "09-personas": ["08-icp-segments"],
+  "10-playbook-selection": ["07-right-to-win-analysis", "08-icp-segments"],
+  "11-previous-campaign-analysis": ["02-main-inputs"],
+  "12-campaign-theme": [
+    "09-personas",
+    "10-playbook-selection",
+    "11-previous-campaign-analysis",
+  ],
+  "13-content-plan": ["12-campaign-theme"],
+  "14-linkedinads-campaign-design": ["13-content-plan"],
+  "15-email-campaign-design": ["13-content-plan"],
+  "16-googleads-campaign-design": ["13-content-plan"],
+  "17-aeo-geo-recommendations": ["13-content-plan"],
+  "18-linkedin-organic": ["13-content-plan"],
+  "19-sdr-play-design": ["10-playbook-selection", "09-personas"],
+  "20-abm-strategy-document": [
+    "03-market-analysis",
+    "04-category-maturity-analysis",
+    "05-competitor-analysis",
+    "06-brand-strength-analysis",
+    "07-right-to-win-analysis",
+    "08-icp-segments",
+    "09-personas",
+    "10-playbook-selection",
+    "12-campaign-theme",
+    "13-content-plan",
+  ],
+  "21-abm-strategy-presentation": ["20-abm-strategy-document"],
+};
+
+// Canonical staging/outputs filename per stage (extension matches what the
+// content actually is; MVP stages are text/markdown docs).
+export const STAGE_FILENAMES: Record<Stage, string> = {
+  "01-project-setup": "project-setup.md",
+  "02-main-inputs": "main-inputs.md",
+  "03-market-analysis": "market-analysis.doc",
+  "04-category-maturity-analysis": "category-maturity-analysis.doc",
+  "05-competitor-analysis": "competitor-analysis.doc",
+  "06-brand-strength-analysis": "brand-strength-analysis.doc",
+  "07-right-to-win-analysis": "right-to-win-analysis.doc",
+  "08-icp-segments": "icp-segments.doc",
+  "09-personas": "personas.doc",
+  "10-playbook-selection": "playbook-selection.doc",
+  "11-previous-campaign-analysis": "previous-campaign-analysis.doc",
+  "12-campaign-theme": "campaign-theme.doc",
+  "13-content-plan": "content-plan.doc",
+  "14-linkedinads-campaign-design": "linkedinads-campaign-design.doc",
+  "15-email-campaign-design": "email-campaign-design.doc",
+  "16-googleads-campaign-design": "googleads-campaign-design.doc",
+  "17-aeo-geo-recommendations": "aeo-geo-recommendations.doc",
+  "18-linkedin-organic": "linkedin-organic.doc",
+  "19-sdr-play-design": "sdr-play-design.doc",
+  "20-abm-strategy-document": "abm-strategy-document.doc",
+  "21-abm-strategy-presentation": "abm-strategy-presentation.pptx",
+};
+
+export interface ProjectInputs {
+  total_quarterly_budget: string;
+  quarterly_performance_budget: string;
+  website: string;
+  target_geography: string;
+  constraints: string;
+}
+
+export interface InputFileRecord {
+  name: string;
+  status: "received" | "pending" | "not-provided";
+  note: string;
+}
+
+export interface ProjectState {
+  client_name: string;
+  client_slug: string;
+  created: string;
+  project_inputs: ProjectInputs;
+  input_files: InputFileRecord[];
+  stage_gates: Record<Stage, GateStatus>;
+  current_skill: Stage;
+  // Tracks the current staged draft version per stage, so redo/approve know
+  // what version number to move to archive/outputs.
+  draft_versions: Record<string, number>;
+}
+
+export interface TextInputEntry {
+  timestamp: string;
+  skill: string;
+  question: string;
+  answer: string;
+}
