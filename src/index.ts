@@ -157,6 +157,23 @@ async function main() {
     }
 
     const httpServer = createServer(async (req, res) => {
+      try {
+        await handleRequest(req, res);
+      } catch (err) {
+        console.error("[MCP Server] Unhandled request error:", err);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal Server Error" }));
+        } else {
+          res.end();
+        }
+      }
+    });
+
+    async function handleRequest(
+      req: import("node:http").IncomingMessage,
+      res: import("node:http").ServerResponse
+    ): Promise<void> {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id");
@@ -194,18 +211,11 @@ async function main() {
           try {
             parsedBody = await readJsonBody(req);
           } catch (err) {
-            console.error(`[DEBUG] JSON parse failed: ${(err as Error).message}`);
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Invalid JSON body" }));
             return;
           }
         }
-
-        console.error(
-          `[DEBUG] method=${req.method} rawPath=${rawPath} pathname=${pathname} existingSessionId=${existingSessionId} isInit=${isInitializeRequest(
-            parsedBody
-          )} bodyPreview=${JSON.stringify(parsedBody).slice(0, 200)}`
-        );
 
         if (existingSessionId || req.method !== "POST" || !isInitializeRequest(parsedBody)) {
           res.writeHead(400, { "Content-Type": "application/json" });
@@ -264,7 +274,7 @@ async function main() {
       }
 
       await transport.handleRequest(req, res);
-    });
+    }
 
     httpServer.listen(config.port, () => {
       console.error(`[MCP Server] Running over Streamable HTTP on port ${config.port}`);
