@@ -1,0 +1,40 @@
+{
+  "client_name": "Acme Robotics",
+  "client_slug": "acme-robotics",
+  "created": "2026-07-30",
+  "project_inputs": {
+    "total_quarterly_budget": "$200k",
+    "quarterly_performance_budget": "$80k",
+    "website": "acmerobotics.example.com",
+    "target_geography": "North America",
+    "constraints": "No competitor brand bidding"
+  },
+  "input_files": [],
+  "stage_gates": {
+    "01-project-setup": "completed",
+    "02-main-inputs": "completed",
+    "03-market-analysis": "completed",
+    "04-category-maturity-analysis": "pending",
+    "05-competitor-analysis": "pending",
+    "06-brand-strength-analysis": "pending",
+    "07-right-to-win-analysis": "pending",
+    "08-icp-segments": "pending",
+    "09-personas": "pending",
+    "10-playbook-selection": "pending",
+    "11-previous-campaign-analysis": "pending",
+    "12-campaign-theme": "pending",
+    "13-content-plan": "pending",
+    "14-linkedinads-campaign-design": "pending",
+    "15-email-campaign-design": "pending",
+    "16-googleads-campaign-design": "pending",
+    "17-aeo-geo-recommendations": "pending",
+    "18-linkedin-organic": "pending",
+    "19-sdr-play-design": "pending",
+    "20-abm-strategy-document": "pending",
+    "21-abm-strategy-presentation": "pending"
+  },
+  "current_skill": "04-category-maturity-analysis",
+  "draft_versions": {
+    "03-market-analysis": 2
+  }
+}

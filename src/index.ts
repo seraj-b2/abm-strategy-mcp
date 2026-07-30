@@ -1,5 +1,8 @@
+import "dotenv/config";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { createServer } from "node:http";
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -8,6 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { TOOLS, callTool } from "./tools/index.js";
 import { RESOURCES, readResource } from "./resources/index.js";
+import { getConfig, checkAuth, verifyToken, AuthState } from "./lib/auth.js";
 
 const SERVER_INSTRUCTIONS = `
 This server replaces the abm-strategy-presentation-v5 Claude Code plugin's
@@ -59,11 +63,29 @@ const server = new Server(
   }
 );
 
+let currentAuthState: AuthState = {
+  authenticated: false,
+  error: "Authentication not performed yet",
+};
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: TOOLS,
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (!currentAuthState.authenticated) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text" as const,
+          text: `[MCP Authentication Error] ${
+            currentAuthState.error || "Valid token required"
+          }. Please generate a valid MCP token from your backend and update your MCP server configuration.`,
+        },
+      ],
+    };
+  }
   return callTool(request.params.name, request.params.arguments ?? {});
 });
 
@@ -72,12 +94,109 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  if (!currentAuthState.authenticated) {
+    return {
+      isError: true,
+      contents: [
+        {
+          uri: request.params.uri,
+          text: `[MCP Authentication Error] ${
+            currentAuthState.error || "Valid token required"
+          }. Please generate a valid MCP token from your backend and update your MCP server configuration.`,
+        },
+      ],
+    };
+  }
   return readResource(request.params.uri);
 });
 
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const config = getConfig();
+
+  // Perform initial authentication check
+  currentAuthState = await checkAuth(config);
+
+  if (currentAuthState.authenticated) {
+    if (currentAuthState.user) {
+      console.error(
+        `[MCP Auth Success] Verified user: ${currentAuthState.user.name} (${currentAuthState.user.email}) | Token: ${
+          currentAuthState.tokenInfo?.name || "Valid"
+        }`
+      );
+    } else {
+      console.error("[MCP Auth Info] Running with auth verification skipped (--skip-auth / SKIP_AUTH=true).");
+    }
+  } else {
+    console.error(`\x1b[33m[MCP Auth Warning] ${currentAuthState.error}\x1b[0m`);
+    console.error(
+      "\x1b[33m[MCP Auth Warning] Server will remain connected, but tool calls will require a valid MCP token.\x1b[0m"
+    );
+  }
+
+  if (config.transport === "stdio") {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("[MCP Server] Connected via Stdio transport.");
+  } else {
+    let sseTransport: SSEServerTransport | null = null;
+
+    const httpServer = createServer(async (req, res) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      const host = req.headers.host || `localhost:${config.port}`;
+      const urlParts = new URL(req.url || "/", `http://${host}`);
+
+      if (urlParts.pathname === "/sse" && req.method === "GET") {
+        const authHeader = req.headers.authorization;
+        const queryToken = urlParts.searchParams.get("token");
+        const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
+
+        if (!config.skipAuth) {
+          if (!token) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Unauthorized: Missing authentication token" }));
+            return;
+          }
+
+          const authRes = await verifyToken(token, config.backendUrl);
+          if (!authRes.valid) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `Unauthorized: ${authRes.error || "Invalid token"}` }));
+            return;
+          }
+        }
+
+        sseTransport = new SSEServerTransport("/messages", res);
+        await server.connect(sseTransport);
+      } else if (urlParts.pathname === "/messages" && req.method === "POST") {
+        if (!sseTransport) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "SSE session not established. Connect to /sse first." }));
+          return;
+        }
+        await sseTransport.handlePostMessage(req, res);
+      } else if (urlParts.pathname === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", service: "abm-strategy-mcp-server" }));
+      } else {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not Found" }));
+      }
+    });
+
+    httpServer.listen(config.port, () => {
+      console.error(`[MCP Server] Running over HTTP/SSE on port ${config.port}`);
+      console.error(`[MCP Server] SSE Endpoint: http://localhost:${config.port}/sse`);
+    });
+  }
 }
 
 main().catch((err) => {
