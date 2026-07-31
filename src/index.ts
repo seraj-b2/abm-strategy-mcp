@@ -347,7 +347,10 @@ async function main() {
         sseTransports.set(sseTransport.sessionId, sseTransport);
 
         res.on("close", () => {
-          sseTransports.delete(sseTransport.sessionId);
+          // Retain session for 5 minutes in case connection drops or Nginx proxies reconnect
+          setTimeout(() => {
+            sseTransports.delete(sseTransport.sessionId);
+          }, 300000);
         });
 
         const sessionServer = createMcpServer(sessionAuth);
