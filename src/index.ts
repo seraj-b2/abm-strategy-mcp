@@ -176,8 +176,11 @@ async function main() {
     ): Promise<void> {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id");
-      res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID"
+      );
+      res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, Mcp-Protocol-Version");
 
       if (req.method === "OPTIONS") {
         res.writeHead(204);
@@ -190,17 +193,25 @@ async function main() {
       const rawPath = urlParts.pathname;
       const pathname = rawPath.replace(/^\/mcp/, "") || "/";
 
+      console.error(
+        `[MCP Request] ${req.method} ${req.url} | Path: ${rawPath} | Session: ${
+          req.headers["mcp-session-id"] || "None"
+        } | Auth: ${req.headers.authorization ? "Present" : "None"}`
+      );
+
+      // Normalize Accept header for SDK streamable HTTP transport requirements
+      if (!req.headers["accept"] || !req.headers["accept"].includes("text/event-stream")) {
+        req.headers["accept"] = "application/json, text/event-stream";
+      }
+
       if (rawPath === "/.well-known/oauth-protected-resource") {
-        if (!process.env.OAUTH_AUTHORIZATION_SERVER_URL) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "OAUTH_AUTHORIZATION_SERVER_URL is not configured" }));
-          return;
-        }
+        const rawAuthServer = process.env.OAUTH_AUTHORIZATION_SERVER_URL || `https://${host}`;
+        const authServerUrl = rawAuthServer.replace(/\/api\/?$/, "").replace(/\/$/, "");
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
             resource: `https://${host}/mcp`,
-            authorization_servers: [process.env.OAUTH_AUTHORIZATION_SERVER_URL],
+            authorization_servers: [authServerUrl],
             scopes_supported: ["abm:read", "abm:write", "mcp:execute"],
             bearer_methods_supported: ["header"],
           })
