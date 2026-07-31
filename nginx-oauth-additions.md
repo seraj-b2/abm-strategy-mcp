@@ -27,6 +27,15 @@ e.g. right after the `# 1. Backend Express API` block.
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    location = /.well-known/openid-configuration {
+        proxy_pass http://127.0.0.1:3001/.well-known/openid-configuration;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # Workaround for a known Claude Desktop/Claude Code bug: instead of using
     # the authorization_endpoint/token_endpoint/registration_endpoint URLs
     # from the discovery metadata as-is, Claude sometimes rebuilds them at
