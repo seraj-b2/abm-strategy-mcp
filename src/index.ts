@@ -380,6 +380,7 @@ async function main() {
         // Create new stateful session transport for initialize request
         const sessionTransport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
+          enableJsonResponse: true,
           onsessioninitialized: (sessionId) => {
             httpTransports.set(sessionId, sessionTransport);
           },
@@ -400,6 +401,7 @@ async function main() {
       // Fallback for stateless POST requests without a session ID
       const statelessTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
+        enableJsonResponse: true,
       });
 
       const statelessServer = createMcpServer(sessionAuth);
