@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer } from "node:http";
 import {
@@ -146,6 +147,7 @@ async function main() {
     console.error("[MCP Server] Connected via Stdio transport.");
   } else {
     const httpTransports = new Map<string, StreamableHTTPServerTransport>();
+    const sseTransports = new Map<string, SSEServerTransport>();
 
     async function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown> {
       const chunks: Buffer[] = [];
@@ -195,7 +197,7 @@ async function main() {
 
       console.error(
         `[MCP Request] ${req.method} ${req.url} | Path: ${rawPath} | Session: ${
-          req.headers["mcp-session-id"] || "None"
+          req.headers["mcp-session-id"] || urlParts.searchParams.get("sessionId") || "None"
         } | Auth: ${req.headers.authorization ? "Present" : "None"}`
       );
 
@@ -225,12 +227,6 @@ async function main() {
         return;
       }
 
-      if (pathname !== "/") {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Not Found" }));
-        return;
-      }
-
       function sendUnauthorized(message: string) {
         const resourceMetadataUrl = `https://${host}/.well-known/oauth-protected-resource`;
         res.writeHead(401, {
@@ -249,10 +245,52 @@ async function main() {
         );
       }
 
-      const existingSessionId = req.headers["mcp-session-id"] as string | undefined;
-      let transport = existingSessionId ? httpTransports.get(existingSessionId) : undefined;
+      // Check if this is an incoming SSE POST message for an existing SSEServerTransport session
+      const sseSessionId = urlParts.searchParams.get("sessionId");
+      if (req.method === "POST" && (pathname === "/messages" || rawPath === "/messages" || rawPath === "/mcp/messages")) {
+        if (!sseSessionId || !sseTransports.has(sseSessionId)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              error: {
+                code: -32000,
+                message: "Bad Request: Invalid or expired SSE session ID",
+              },
+              id: null,
+            })
+          );
+          return;
+        }
 
-      if (transport) {
+        let parsedBody: unknown;
+        try {
+          parsedBody = await readJsonBody(req);
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              error: {
+                code: -32700,
+                message: "Parse error: Invalid JSON body",
+              },
+              id: null,
+            })
+          );
+          return;
+        }
+
+        const sseTransport = sseTransports.get(sseSessionId)!;
+        await sseTransport.handlePostMessage(req, res, parsedBody);
+        return;
+      }
+
+      // Check if this is an incoming request for an existing StreamableHTTPServerTransport session
+      const existingSessionId = req.headers["mcp-session-id"] as string | undefined;
+      const streamTransport = existingSessionId ? httpTransports.get(existingSessionId) : undefined;
+
+      if (streamTransport) {
         let parsedBody: unknown;
         if (req.method === "POST") {
           try {
@@ -272,7 +310,7 @@ async function main() {
             return;
           }
         }
-        await transport.handleRequest(req, res, parsedBody);
+        await streamTransport.handleRequest(req, res, parsedBody);
         return;
       }
 
@@ -302,6 +340,22 @@ async function main() {
         };
       }
 
+      // Handle GET requests: Establish SSE stream using SSEServerTransport
+      if (req.method === "GET") {
+        const endpointPath = rawPath.startsWith("/mcp") ? "/mcp/messages" : "/messages";
+        const sseTransport = new SSEServerTransport(endpointPath, res);
+        sseTransports.set(sseTransport.sessionId, sseTransport);
+
+        res.on("close", () => {
+          sseTransports.delete(sseTransport.sessionId);
+        });
+
+        const sessionServer = createMcpServer(sessionAuth);
+        await sessionServer.connect(sseTransport);
+        return;
+      }
+
+      // Handle POST requests
       let parsedBody: unknown;
       if (req.method === "POST") {
         try {
@@ -343,7 +397,7 @@ async function main() {
         return;
       }
 
-      // Fallback for GET requests (SSE streams) or stateless POST requests without a session ID
+      // Fallback for stateless POST requests without a session ID
       const statelessTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
