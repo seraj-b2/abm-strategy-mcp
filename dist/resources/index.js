@@ -8,7 +8,7 @@ const STAGES_DIR = path.join(__dirname, "stages");
 // listed here are unported (MVP covers 01-03) - reading their resource
 // returns a placeholder rather than failing outright, so advance_stage/
 // get_stage_context still work end-to-end through the pipeline definition.
-const PORTED_STAGES = ["01-project-setup", "02-main-inputs", "03-market-analysis"];
+const PORTED_STAGES = [...STAGE_ORDER];
 export const RESOURCES = STAGE_ORDER.map((stage) => ({
     uri: `abm://stages/${stage}`,
     name: `Stage: ${stage}`,
