@@ -201,6 +201,8 @@ async function main() {
           JSON.stringify({
             resource: `https://${host}/mcp`,
             authorization_servers: [process.env.OAUTH_AUTHORIZATION_SERVER_URL],
+            scopes_supported: ["abm:read", "abm:write", "mcp:execute"],
+            bearer_methods_supported: ["header"],
           })
         );
         return;
@@ -224,7 +226,16 @@ async function main() {
           "Content-Type": "application/json",
           "WWW-Authenticate": `Bearer resource_metadata="${resourceMetadataUrl}"`,
         });
-        res.end(JSON.stringify({ error: `Unauthorized: ${message}` }));
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: {
+              code: -32000,
+              message: `Unauthorized: ${message}`,
+            },
+            id: null,
+          })
+        );
       }
 
       const existingSessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -262,7 +273,16 @@ async function main() {
             parsedBody = await readJsonBody(req);
           } catch (err) {
             res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Invalid JSON body" }));
+            res.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                error: {
+                  code: -32700,
+                  message: "Parse error: Invalid JSON body",
+                },
+                id: null,
+              })
+            );
             return;
           }
         }
@@ -271,7 +291,12 @@ async function main() {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              error: "Bad Request: No valid session found. Send an 'initialize' request first.",
+              jsonrpc: "2.0",
+              error: {
+                code: -32000,
+                message: "Bad Request: No valid session found. Send an 'initialize' request first.",
+              },
+              id: null,
             })
           );
           return;
