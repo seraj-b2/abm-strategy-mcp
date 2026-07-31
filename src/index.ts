@@ -252,32 +252,7 @@ async function main() {
       const existingSessionId = req.headers["mcp-session-id"] as string | undefined;
       let transport = existingSessionId ? httpTransports.get(existingSessionId) : undefined;
 
-      if (!transport) {
-        const authHeader = req.headers.authorization;
-        const queryToken = urlParts.searchParams.get("token");
-        const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
-
-        let sessionAuth: AuthState = { authenticated: true };
-
-        if (!config.skipAuth) {
-          if (!token) {
-            sendUnauthorized("Missing authentication token");
-            return;
-          }
-
-          const authRes = await verifyToken(token, config.backendUrl);
-          if (!authRes.valid) {
-            sendUnauthorized(authRes.error || "Invalid token");
-            return;
-          }
-
-          sessionAuth = {
-            authenticated: true,
-            user: authRes.user,
-            tokenInfo: authRes.tokenInfo,
-          };
-        }
-
+      if (transport) {
         let parsedBody: unknown;
         if (req.method === "POST") {
           try {
@@ -297,42 +272,85 @@ async function main() {
             return;
           }
         }
+        await transport.handleRequest(req, res, parsedBody);
+        return;
+      }
 
-        if (existingSessionId || req.method !== "POST" || !isInitializeRequest(parsedBody)) {
+      // No active session transport found. Verify authentication token.
+      const authHeader = req.headers.authorization;
+      const queryToken = urlParts.searchParams.get("token");
+      const token = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || config.token;
+
+      let sessionAuth: AuthState = { authenticated: true };
+
+      if (!config.skipAuth) {
+        if (!token) {
+          sendUnauthorized("Missing authentication token");
+          return;
+        }
+
+        const authRes = await verifyToken(token, config.backendUrl);
+        if (!authRes.valid) {
+          sendUnauthorized(authRes.error || "Invalid token");
+          return;
+        }
+
+        sessionAuth = {
+          authenticated: true,
+          user: authRes.user,
+          tokenInfo: authRes.tokenInfo,
+        };
+      }
+
+      let parsedBody: unknown;
+      if (req.method === "POST") {
+        try {
+          parsedBody = await readJsonBody(req);
+        } catch (err) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
               jsonrpc: "2.0",
               error: {
-                code: -32000,
-                message: "Bad Request: No valid session found. Send an 'initialize' request first.",
+                code: -32700,
+                message: "Parse error: Invalid JSON body",
               },
               id: null,
             })
           );
           return;
         }
+      }
 
-        transport = new StreamableHTTPServerTransport({
+      if (req.method === "POST" && isInitializeRequest(parsedBody)) {
+        // Create new stateful session transport for initialize request
+        const sessionTransport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sessionId) => {
-            httpTransports.set(sessionId, transport!);
+            httpTransports.set(sessionId, sessionTransport);
           },
         });
 
-        transport.onclose = () => {
-          if (transport!.sessionId) {
-            httpTransports.delete(transport!.sessionId);
+        sessionTransport.onclose = () => {
+          if (sessionTransport.sessionId) {
+            httpTransports.delete(sessionTransport.sessionId);
           }
         };
 
         const sessionServer = createMcpServer(sessionAuth);
-        await sessionServer.connect(transport);
-        await transport.handleRequest(req, res, parsedBody);
+        await sessionServer.connect(sessionTransport);
+        await sessionTransport.handleRequest(req, res, parsedBody);
         return;
       }
 
-      await transport.handleRequest(req, res);
+      // Fallback for GET requests (SSE streams) or stateless POST requests without a session ID
+      const statelessTransport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+
+      const statelessServer = createMcpServer(sessionAuth);
+      await statelessServer.connect(statelessTransport);
+      await statelessTransport.handleRequest(req, res, parsedBody);
     }
 
     httpServer.listen(config.port, () => {
