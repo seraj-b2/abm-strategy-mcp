@@ -342,7 +342,7 @@ async function main() {
 
       // Handle GET requests: Establish SSE stream using SSEServerTransport
       if (req.method === "GET") {
-        const endpointPath = rawPath.startsWith("/mcp") ? "/mcp/messages" : "/messages";
+        const endpointPath = "/mcp/messages";
         const sseTransport = new SSEServerTransport(endpointPath, res);
         sseTransports.set(sseTransport.sessionId, sseTransport);
 
