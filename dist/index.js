@@ -164,6 +164,11 @@ async function main() {
                 req.headers["accept"] = "application/json, text/event-stream";
             }
             if (rawPath === "/.well-known/oauth-protected-resource") {
+                if (config.skipAuth) {
+                    res.writeHead(404, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "OAuth disabled on this server" }));
+                    return;
+                }
                 const rawAuthServer = process.env.OAUTH_AUTHORIZATION_SERVER_URL || `https://${host}`;
                 const authServerUrl = rawAuthServer.replace(/\/api\/?$/, "").replace(/\/$/, "");
                 res.writeHead(200, { "Content-Type": "application/json" });

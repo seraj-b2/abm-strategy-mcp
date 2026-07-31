@@ -4,7 +4,7 @@ export function getConfig() {
     let backendUrl = process.env.BACKEND_URL || "http://localhost:5000";
     let transport = process.env.TRANSPORT || "stdio";
     let port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-    let skipAuth = process.env.SKIP_AUTH === "true";
+    let skipAuth = process.env.SKIP_AUTH !== "false";
     for (let i = 0; i < args.length; i++) {
         if (args[i] === "--token" && args[i + 1]) {
             token = args[i + 1];
@@ -24,6 +24,9 @@ export function getConfig() {
         }
         else if (args[i] === "--skip-auth") {
             skipAuth = true;
+        }
+        else if (args[i] === "--require-auth") {
+            skipAuth = false;
         }
     }
     return { token, backendUrl, transport, port, skipAuth };
