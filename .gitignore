@@ -2,7 +2,6 @@
 node_modules/
 
 # Production output / Build logs
-dist/
 *.tsbuildinfo
 
 # Logs
